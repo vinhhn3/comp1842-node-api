@@ -1,224 +1,248 @@
-## 2: Add MongoDB
+## Add Authentication
 
-### Step 1: Install Mongoose
+To add authentication to our Node.js API, we will use JWT (JSON Web Tokens) for token-based authentication. Here's a step-by-step guide to update the project with authentication features.
 
-First, install Mongoose using npm:
+### Step 1: Install Required Packages
+
+First, install the necessary packages for authentication:
 
 ```bash
-npm install mongoose
+npm install bcryptjs jsonwebtoken express-validator
 ```
 
-### Step 2: Set Up Mongoose Connection
+### Step 2: Create User Model
 
-Create a new file to handle the MongoDB connection.
-**db.js**
+Add a `User` model to handle user data and authentication.**models/user.js**
 
 ```javascript
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
-const connectDB = async () => {
+const userSchema = new mongoose.Schema({
+  username: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  password: {
+    type: String,
+    required: true,
+  },
+});
+
+// Hash password before saving the user
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) {
+    return next();
+  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Compare input password with the hashed password in the database
+userSchema.methods.matchPassword = async function (password) {
+  return await bcrypt.compare(password, this.password);
+};
+
+const User = mongoose.model("User", userSchema);
+
+module.exports = User;
+```
+
+### Step 3: Create Authentication Controller
+
+Create a controller to handle user registration, login, and authentication.
+**controllers/authController.js**
+
+```javascript
+const User = require("../models/user");
+const jwt = require("jsonwebtoken");
+const { validationResult } = require("express-validator");
+
+exports.registerUser = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const { username, password } = req.body;
+
   try {
-    await mongoose.connect("mongodb://localhost:27017/nodejs-api", {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+    let user = await User.findOne({ username });
+
+    if (user) {
+      return res.status(400).json({ msg: "User already exists" });
+    }
+
+    user = new User({ username, password });
+
+    await user.save();
+
+    const payload = {
+      user: {
+        id: user.id,
+      },
+    };
+
+    jwt.sign(payload, "secret", { expiresIn: "1h" }, (err, token) => {
+      if (err) throw err;
+      res.json({ token });
     });
-    console.log("MongoDB connected successfully");
   } catch (err) {
-    console.error("MongoDB connection error:", err.message);
-    process.exit(1);
+    console.error(err.message);
+    res.status(500).send("Server error");
   }
 };
 
-module.exports = connectDB;
+exports.loginUser = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const { username, password } = req.body;
+
+  try {
+    let user = await User.findOne({ username });
+
+    if (!user) {
+      return res.status(400).json({ msg: "Invalid Credentials" });
+    }
+
+    const isMatch = await user.matchPassword(password);
+
+    if (!isMatch) {
+      return res.status(400).json({ msg: "Invalid Credentials" });
+    }
+
+    const payload = {
+      user: {
+        id: user.id,
+      },
+    };
+
+    jwt.sign(payload, "secret", { expiresIn: "1h" }, (err, token) => {
+      if (err) throw err;
+      res.json({ token });
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server error");
+  }
+};
+
+exports.getUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
+    res.json(user);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server error");
+  }
+};
 ```
 
-### Step 3: Update Models to Use Mongoose
+### Step 4: Create Authentication Middleware
 
-Update the `Product` and `Category` models to use Mongoose schemas.**models/product.js**
+Create a middleware to protect routes that require authentication.
+**middleware/auth.js**
 
 ```javascript
-const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
 
-const productSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-  },
-  category: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Category",
-    required: true,
-  },
-});
+module.exports = function (req, res, next) {
+  const token = req.header("x-auth-token");
 
-const Product = mongoose.model("Product", productSchema);
+  if (!token) {
+    return res.status(401).json({ msg: "No token, authorization denied" });
+  }
 
-module.exports = Product;
+  try {
+    const decoded = jwt.verify(token, "secret");
+    req.user = decoded.user;
+    next();
+  } catch (err) {
+    res.status(401).json({ msg: "Token is not valid" });
+  }
+};
 ```
 
-**models/category.js**
+### Step 5: Create Authentication Routes
+
+Create routes for user registration and login.
+**routes/authRoutes.js**
 
 ```javascript
-const mongoose = require("mongoose");
+const express = require("express");
+const router = express.Router();
+const { check } = require("express-validator");
+const authController = require("../controllers/authController");
+const auth = require("../middleware/auth");
 
-const categorySchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-  },
-});
+router.post(
+  "/register",
+  [
+    check("username", "Username is required").not().isEmpty(),
+    check("password", "Password is required").isLength({ min: 6 }),
+  ],
+  authController.registerUser
+);
 
-const Category = mongoose.model("Category", categorySchema);
+router.post(
+  "/login",
+  [
+    check("username", "Username is required").not().isEmpty(),
+    check("password", "Password is required").exists(),
+  ],
+  authController.loginUser
+);
 
-module.exports = Category;
+router.get("/", auth, authController.getUser);
+
+module.exports = router;
 ```
 
-### Step 4: Update Controllers to Use Mongoose Methods
+### Step 6: Protect Product and Category Routes
 
-Modify the controllers to use Mongoose methods for database operations.
-**controllers/productController.js**
+Update the product and category routes to require authentication.
+**routes/productRoutes.js**
 
 ```javascript
-const Product = require("../models/product");
+const express = require("express");
+const router = express.Router();
+const productController = require("../controllers/productController");
+const auth = require("../middleware/auth");
 
-exports.getAllProducts = async (req, res) => {
-  try {
-    const products = await Product.find().populate("category");
-    res.json(products);
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
+router.get("/", auth, productController.getAllProducts);
+router.get("/:id", auth, productController.getProductById);
+router.post("/", auth, productController.createProduct);
+router.put("/:id", auth, productController.updateProduct);
+router.delete("/:id", auth, productController.deleteProduct);
 
-exports.getProductById = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id).populate("category");
-    if (product) {
-      res.json(product);
-    } else {
-      res.status(404).send("Product not found");
-    }
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
-
-exports.createProduct = async (req, res) => {
-  try {
-    const { name, category } = req.body;
-    const product = new Product({ name, category });
-    await product.save();
-    res.status(201).json(product);
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
-
-exports.updateProduct = async (req, res) => {
-  try {
-    const { name, category } = req.body;
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      { name, category },
-      { new: true }
-    );
-    if (product) {
-      res.json(product);
-    } else {
-      res.status(404).send("Product not found");
-    }
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
-
-exports.deleteProduct = async (req, res) => {
-  try {
-    const product = await Product.findByIdAndDelete(req.params.id);
-    if (product) {
-      res.status(204).send();
-    } else {
-      res.status(404).send("Product not found");
-    }
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
+module.exports = router;
 ```
 
-**controllers/categoryController.js**
+**routes/categoryRoutes.js**
 
 ```javascript
-const Category = require("../models/category");
+const express = require("express");
+const router = express.Router();
+const categoryController = require("../controllers/categoryController");
+const auth = require("../middleware/auth");
 
-exports.getAllCategories = async (req, res) => {
-  try {
-    const categories = await Category.find();
-    res.json(categories);
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
+router.get("/", auth, categoryController.getAllCategories);
+router.get("/:id", auth, categoryController.getCategoryById);
+router.post("/", auth, categoryController.createCategory);
+router.put("/:id", auth, categoryController.updateCategory);
+router.delete("/:id", auth, categoryController.deleteCategory);
 
-exports.getCategoryById = async (req, res) => {
-  try {
-    const category = await Category.findById(req.params.id);
-    if (category) {
-      res.json(category);
-    } else {
-      res.status(404).send("Category not found");
-    }
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
-
-exports.createCategory = async (req, res) => {
-  try {
-    const { name } = req.body;
-    const category = new Category({ name });
-    await category.save();
-    res.status(201).json(category);
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
-
-exports.updateCategory = async (req, res) => {
-  try {
-    const { name } = req.body;
-    const category = await Category.findByIdAndUpdate(
-      req.params.id,
-      { name },
-      { new: true }
-    );
-    if (category) {
-      res.json(category);
-    } else {
-      res.status(404).send("Category not found");
-    }
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
-
-exports.deleteCategory = async (req, res) => {
-  try {
-    const category = await Category.findByIdAndDelete(req.params.id);
-    if (category) {
-      res.status(204).send();
-    } else {
-      res.status(404).send("Category not found");
-    }
-  } catch (err) {
-    res.status(500).send("Server Error");
-  }
-};
+module.exports = router;
 ```
 
-### Step 5: Update the Main Application File
+### Step 7: Update Main Application File
 
-Update the main application file to connect to the MongoDB database.
+Update the main application file to use the authentication routes.
 **app.js**
 
 ```javascript
@@ -226,6 +250,7 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const productRoutes = require("./routes/productRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
+const authRoutes = require("./routes/authRoutes");
 const connectDB = require("./db");
 
 const app = express();
@@ -236,11 +261,12 @@ app.use(bodyParser.json());
 
 app.use("/products", productRoutes);
 app.use("/categories", categoryRoutes);
+app.use("/auth", authRoutes);
 
 module.exports = app;
 ```
 
-### Step 6: Run the Application
+### Step 8: Run the Application
 
 Start the server:
 
@@ -248,6 +274,8 @@ Start the server:
 node server.js
 ```
 
+![1722925064904](image/README/1722925064904.png)
+
 ### Summary
 
-You have now integrated MongoDB into your Node.js API using Mongoose. The data for products and categories is now stored in a MongoDB database, and the controllers have been updated to perform database operations using Mongoose methods.
+You have now added authentication to your Node.js API using JWT. Users can register, login, and access protected routes. Only authenticated users can perform CRUD operations on products and categories.
