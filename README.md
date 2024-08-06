@@ -1,55 +1,57 @@
-## 1: Basic NodeJS API
+## 2: Add MongoDB
 
-### Step 1: Set Up the Project
+### Step 1: Install Mongoose
 
-1. **Initialize the Project**
-   First, create a new directory for your project and navigate into it. Then, initialize a new Node.js project using npm:
-
-```bash
-mkdir nodejs-api
-cd nodejs-api
-npm init -y
-```
-
-2. **Install Dependencies**
-   Next, install the necessary dependencies:
+First, install Mongoose using npm:
 
 ```bash
-npm install express body-parser
+npm install mongoose
 ```
 
-### Step 2: Create the Directory Structure
+### Step 2: Set Up Mongoose Connection
 
-Create the following directory structure to organize your project:
-
-```Copy code
-nodejs-api/
-├── controllers/
-│   ├── categoryController.js
-│   └── productController.js
-├── models/
-│   ├── category.js
-│   └── product.js
-├── routes/
-│   ├── categoryRoutes.js
-│   └── productRoutes.js
-├── app.js
-└── server.js
-```
-
-### Step 3: Create the Models
-
-Define the data models for Product and Category. Since we are not using a database, we will use in-memory data storage.
-**models/product.js**
+Create a new file to handle the MongoDB connection.
+**db.js**
 
 ```javascript
-class Product {
-  constructor(id, name, category) {
-    this.id = id;
-    this.name = name;
-    this.category = category;
+const mongoose = require("mongoose");
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect("mongodb://localhost:27017/nodejs-api", {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log("MongoDB connected successfully");
+  } catch (err) {
+    console.error("MongoDB connection error:", err.message);
+    process.exit(1);
   }
-}
+};
+
+module.exports = connectDB;
+```
+
+### Step 3: Update Models to Use Mongoose
+
+Update the `Product` and `Category` models to use Mongoose schemas.**models/product.js**
+
+```javascript
+const mongoose = require("mongoose");
+
+const productSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  category: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Category",
+    required: true,
+  },
+});
+
+const Product = mongoose.model("Product", productSchema);
 
 module.exports = Product;
 ```
@@ -57,67 +59,89 @@ module.exports = Product;
 **models/category.js**
 
 ```javascript
-class Category {
-  constructor(id, name) {
-    this.id = id;
-    this.name = name;
-  }
-}
+const mongoose = require("mongoose");
+
+const categorySchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+});
+
+const Category = mongoose.model("Category", categorySchema);
 
 module.exports = Category;
 ```
 
-### Step 4: Create the Controllers
+### Step 4: Update Controllers to Use Mongoose Methods
 
-Implement the logic for handling requests related to products and categories.
+Modify the controllers to use Mongoose methods for database operations.
 **controllers/productController.js**
 
 ```javascript
 const Product = require("../models/product");
 
-let products = [];
-
-exports.getAllProducts = (req, res) => {
-  res.json(products);
-};
-
-exports.getProductById = (req, res) => {
-  const product = products.find((p) => p.id === parseInt(req.params.id));
-  if (product) {
-    res.json(product);
-  } else {
-    res.status(404).send("Product not found");
+exports.getAllProducts = async (req, res) => {
+  try {
+    const products = await Product.find().populate("category");
+    res.json(products);
+  } catch (err) {
+    res.status(500).send("Server Error");
   }
 };
 
-exports.createProduct = (req, res) => {
-  const { id, name, category } = req.body;
-  const product = new Product(id, name, category);
-  products.push(product);
-  res.status(201).json(product);
-};
-
-exports.updateProduct = (req, res) => {
-  const { id, name, category } = req.body;
-  const product = products.find((p) => p.id === parseInt(req.params.id));
-  if (product) {
-    product.name = name;
-    product.category = category;
-    res.json(product);
-  } else {
-    res.status(404).send("Product not found");
+exports.getProductById = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id).populate("category");
+    if (product) {
+      res.json(product);
+    } else {
+      res.status(404).send("Product not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
   }
 };
 
-exports.deleteProduct = (req, res) => {
-  const productIndex = products.findIndex(
-    (p) => p.id === parseInt(req.params.id)
-  );
-  if (productIndex !== -1) {
-    products.splice(productIndex, 1);
-    res.status(204).send();
-  } else {
-    res.status(404).send("Product not found");
+exports.createProduct = async (req, res) => {
+  try {
+    const { name, category } = req.body;
+    const product = new Product({ name, category });
+    await product.save();
+    res.status(201).json(product);
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
+
+exports.updateProduct = async (req, res) => {
+  try {
+    const { name, category } = req.body;
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      { name, category },
+      { new: true }
+    );
+    if (product) {
+      res.json(product);
+    } else {
+      res.status(404).send("Product not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
+
+exports.deleteProduct = async (req, res) => {
+  try {
+    const product = await Product.findByIdAndDelete(req.params.id);
+    if (product) {
+      res.status(204).send();
+    } else {
+      res.status(404).send("Product not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
   }
 };
 ```
@@ -127,90 +151,74 @@ exports.deleteProduct = (req, res) => {
 ```javascript
 const Category = require("../models/category");
 
-let categories = [];
-
-exports.getAllCategories = (req, res) => {
-  res.json(categories);
-};
-
-exports.getCategoryById = (req, res) => {
-  const category = categories.find((c) => c.id === parseInt(req.params.id));
-  if (category) {
-    res.json(category);
-  } else {
-    res.status(404).send("Category not found");
+exports.getAllCategories = async (req, res) => {
+  try {
+    const categories = await Category.find();
+    res.json(categories);
+  } catch (err) {
+    res.status(500).send("Server Error");
   }
 };
 
-exports.createCategory = (req, res) => {
-  const { id, name } = req.body;
-  const category = new Category(id, name);
-  categories.push(category);
-  res.status(201).json(category);
-};
-
-exports.updateCategory = (req, res) => {
-  const { id, name } = req.body;
-  const category = categories.find((c) => c.id === parseInt(req.params.id));
-  if (category) {
-    category.name = name;
-    res.json(category);
-  } else {
-    res.status(404).send("Category not found");
+exports.getCategoryById = async (req, res) => {
+  try {
+    const category = await Category.findById(req.params.id);
+    if (category) {
+      res.json(category);
+    } else {
+      res.status(404).send("Category not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
   }
 };
 
-exports.deleteCategory = (req, res) => {
-  const categoryIndex = categories.findIndex(
-    (c) => c.id === parseInt(req.params.id)
-  );
-  if (categoryIndex !== -1) {
-    categories.splice(categoryIndex, 1);
-    res.status(204).send();
-  } else {
-    res.status(404).send("Category not found");
+exports.createCategory = async (req, res) => {
+  try {
+    const { name } = req.body;
+    const category = new Category({ name });
+    await category.save();
+    res.status(201).json(category);
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
+
+exports.updateCategory = async (req, res) => {
+  try {
+    const { name } = req.body;
+    const category = await Category.findByIdAndUpdate(
+      req.params.id,
+      { name },
+      { new: true }
+    );
+    if (category) {
+      res.json(category);
+    } else {
+      res.status(404).send("Category not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
+
+exports.deleteCategory = async (req, res) => {
+  try {
+    const category = await Category.findByIdAndDelete(req.params.id);
+    if (category) {
+      res.status(204).send();
+    } else {
+      res.status(404).send("Category not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
   }
 };
 ```
 
-### Step 5: Create the Routes
+### Step 5: Update the Main Application File
 
-Define the routes for products and categories.
-**routes/productRoutes.js**
-
-```javascript
-const express = require("express");
-const router = express.Router();
-const productController = require("../controllers/productController");
-
-router.get("/", productController.getAllProducts);
-router.get("/:id", productController.getProductById);
-router.post("/", productController.createProduct);
-router.put("/:id", productController.updateProduct);
-router.delete("/:id", productController.deleteProduct);
-
-module.exports = router;
-```
-
-**routes/categoryRoutes.js**
-
-```javascript
-const express = require("express");
-const router = express.Router();
-const categoryController = require("../controllers/categoryController");
-
-router.get("/", categoryController.getAllCategories);
-router.get("/:id", categoryController.getCategoryById);
-router.post("/", categoryController.createCategory);
-router.put("/:id", categoryController.updateCategory);
-router.delete("/:id", categoryController.deleteCategory);
-
-module.exports = router;
-```
-
-### Step 6: Set Up the Express Application
-
-Create the main application file.
+Update the main application file to connect to the MongoDB database.
 **app.js**
 
 ```javascript
@@ -218,8 +226,11 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const productRoutes = require("./routes/productRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
+const connectDB = require("./db");
 
 const app = express();
+
+connectDB(); // Connect to MongoDB
 
 app.use(bodyParser.json());
 
@@ -229,26 +240,14 @@ app.use("/categories", categoryRoutes);
 module.exports = app;
 ```
 
-### Step 7: Create the Server
+### Step 6: Run the Application
 
-Create the server file to start the application.
-**server.js**
-
-```javascript
-const app = require("./app");
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
-```
-
-### Step 8: Run the Application
-
-Start the server by running:
+Start the server:
 
 ```bash
 node server.js
 ```
 
-This concludes the creation of a basic Node.js API following the MVC pattern without a database.
+### Summary
+
+You have now integrated MongoDB into your Node.js API using Mongoose. The data for products and categories is now stored in a MongoDB database, and the controllers have been updated to perform database operations using Mongoose methods.
