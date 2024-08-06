@@ -553,4 +553,21 @@ module.exports = swaggerSpec;
 
 You have now set up Swagger for your Node.js API, including the ability to configure headers for authentication. This setup provides interactive API documentation and allows you to test your API endpoints directly from the Swagger UI.
 
+#### API Endpoints
+
+| Endpoint         | Method | Description           | Auth Required | Role Required |
+| ---------------- | ------ | --------------------- | ------------- | ------------- |
+| /products        | GET    | Get all products      | Yes           | None          |
+| /products/{id}   | GET    | Get a product by ID   | Yes           | None          |
+| /products        | POST   | Create a new product  | Yes           | Admin         |
+| /products/{id}   | PUT    | Update a product      | Yes           | Admin         |
+| /products/{id}   | DELETE | Remove a product      | Yes           | Admin         |
+| /categories      | GET    | Get all categories    | Yes           | None          |
+| /categories/{id} | GET    | Get a category by ID  | Yes           | None          |
+| /categories      | POST   | Create a new category | Yes           | Admin         |
+| /categories/{id} | PUT    | Update a category     | Yes           | Admin         |
+| /categories/{id} | DELETE | Remove a category     | Yes           | Admin         |
+| /auth/register   | POST   | Register a new user   | No            | None          |
+| /auth/login      | POST   | Log in a user         | No            | None          |
+
 ![1722951704729](image/README/1722951704729.png)
