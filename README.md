@@ -1,18 +1,8 @@
-## Add Authentication
+## Add Authorization: Admin and Customer role
 
-To add authentication to our Node.js API, we will use JWT (JSON Web Tokens) for token-based authentication. Here's a step-by-step guide to update the project with authentication features.
+### Step 1: Update User Model
 
-### Step 1: Install Required Packages
-
-First, install the necessary packages for authentication:
-
-```bash
-npm install bcryptjs jsonwebtoken express-validator
-```
-
-### Step 2: Create User Model
-
-Add a `User` model to handle user data and authentication.**models/user.js**
+Add a `role` field to the `User` model.**models/user.js**
 
 ```javascript
 const mongoose = require("mongoose");
@@ -27,6 +17,11 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: true,
+  },
+  role: {
+    type: String,
+    enum: ["admin", "customer"],
+    default: "customer",
   },
 });
 
@@ -50,10 +45,9 @@ const User = mongoose.model("User", userSchema);
 module.exports = User;
 ```
 
-### Step 3: Create Authentication Controller
+### Step 2: Update Authentication Controller
 
-Create a controller to handle user registration, login, and authentication.
-**controllers/authController.js**
+Ensure that the `registerUser` function allows setting the user role.**controllers/authController.js**
 
 ```javascript
 const User = require("../models/user");
@@ -66,7 +60,7 @@ exports.registerUser = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const { username, password } = req.body;
+  const { username, password, role } = req.body;
 
   try {
     let user = await User.findOne({ username });
@@ -75,13 +69,14 @@ exports.registerUser = async (req, res) => {
       return res.status(400).json({ msg: "User already exists" });
     }
 
-    user = new User({ username, password });
+    user = new User({ username, password, role });
 
     await user.save();
 
     const payload = {
       user: {
         id: user.id,
+        role: user.role,
       },
     };
 
@@ -119,6 +114,7 @@ exports.loginUser = async (req, res) => {
     const payload = {
       user: {
         id: user.id,
+        role: user.role,
       },
     };
 
@@ -143,9 +139,9 @@ exports.getUser = async (req, res) => {
 };
 ```
 
-### Step 4: Create Authentication Middleware
+### Step 3: Create Authorization Middleware
 
-Create a middleware to protect routes that require authentication.
+Create a middleware to check user roles.
 **middleware/auth.js**
 
 ```javascript
@@ -168,9 +164,61 @@ module.exports = function (req, res, next) {
 };
 ```
 
-### Step 5: Create Authentication Routes
+**middleware/role.js**
 
-Create routes for user registration and login.
+```javascript
+module.exports = function (roles) {
+  return function (req, res, next) {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ msg: "Access denied" });
+    }
+    next();
+  };
+};
+```
+
+### Step 4: Protect Routes with Role-Based Access Control
+
+Update the routes to include role checks.
+**routes/productRoutes.js**
+
+```javascript
+const express = require("express");
+const router = express.Router();
+const productController = require("../controllers/productController");
+const auth = require("../middleware/auth");
+const role = require("../middleware/role");
+
+router.get("/", auth, productController.getAllProducts);
+router.get("/:id", auth, productController.getProductById);
+router.post("/", auth, role(["admin"]), productController.createProduct);
+router.put("/:id", auth, role(["admin"]), productController.updateProduct);
+router.delete("/:id", auth, role(["admin"]), productController.deleteProduct);
+
+module.exports = router;
+```
+
+**routes/categoryRoutes.js**
+
+```javascript
+const express = require("express");
+const router = express.Router();
+const categoryController = require("../controllers/categoryController");
+const auth = require("../middleware/auth");
+const role = require("../middleware/role");
+
+router.get("/", auth, categoryController.getAllCategories);
+router.get("/:id", auth, categoryController.getCategoryById);
+router.post("/", auth, role(["admin"]), categoryController.createCategory);
+router.put("/:id", auth, role(["admin"]), categoryController.updateCategory);
+router.delete("/:id", auth, role(["admin"]), categoryController.deleteCategory);
+
+module.exports = router;
+```
+
+### Step 5: Update Authentication Routes
+
+Update the authentication routes to allow setting roles.
 **routes/authRoutes.js**
 
 ```javascript
@@ -185,6 +233,7 @@ router.post(
   [
     check("username", "Username is required").not().isEmpty(),
     check("password", "Password is required").isLength({ min: 6 }),
+    check("role", "Role is required").isIn(["admin", "customer"]),
   ],
   authController.registerUser
 );
@@ -203,70 +252,7 @@ router.get("/", auth, authController.getUser);
 module.exports = router;
 ```
 
-### Step 6: Protect Product and Category Routes
-
-Update the product and category routes to require authentication.
-**routes/productRoutes.js**
-
-```javascript
-const express = require("express");
-const router = express.Router();
-const productController = require("../controllers/productController");
-const auth = require("../middleware/auth");
-
-router.get("/", auth, productController.getAllProducts);
-router.get("/:id", auth, productController.getProductById);
-router.post("/", auth, productController.createProduct);
-router.put("/:id", auth, productController.updateProduct);
-router.delete("/:id", auth, productController.deleteProduct);
-
-module.exports = router;
-```
-
-**routes/categoryRoutes.js**
-
-```javascript
-const express = require("express");
-const router = express.Router();
-const categoryController = require("../controllers/categoryController");
-const auth = require("../middleware/auth");
-
-router.get("/", auth, categoryController.getAllCategories);
-router.get("/:id", auth, categoryController.getCategoryById);
-router.post("/", auth, categoryController.createCategory);
-router.put("/:id", auth, categoryController.updateCategory);
-router.delete("/:id", auth, categoryController.deleteCategory);
-
-module.exports = router;
-```
-
-### Step 7: Update Main Application File
-
-Update the main application file to use the authentication routes.
-**app.js**
-
-```javascript
-const express = require("express");
-const bodyParser = require("body-parser");
-const productRoutes = require("./routes/productRoutes");
-const categoryRoutes = require("./routes/categoryRoutes");
-const authRoutes = require("./routes/authRoutes");
-const connectDB = require("./db");
-
-const app = express();
-
-connectDB(); // Connect to MongoDB
-
-app.use(bodyParser.json());
-
-app.use("/products", productRoutes);
-app.use("/categories", categoryRoutes);
-app.use("/auth", authRoutes);
-
-module.exports = app;
-```
-
-### Step 8: Run the Application
+### Step 6: Run the Application
 
 Start the server:
 
@@ -274,8 +260,6 @@ Start the server:
 node server.js
 ```
 
-![1722925064904](image/README/1722925064904.png)
-
 ### Summary
 
-You have now added authentication to your Node.js API using JWT. Users can register, login, and access protected routes. Only authenticated users can perform CRUD operations on products and categories.
+You have now implemented role-based authorization in your Node.js API. Admin users can create, update, and delete products and categories, while customer users can only read them. This ensures that sensitive operations are restricted to users with the appropriate permissions.

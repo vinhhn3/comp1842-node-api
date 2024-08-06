@@ -9,6 +9,7 @@ router.post(
   [
     check("username", "Username is required").not().isEmpty(),
     check("password", "Password is required").isLength({ min: 6 }),
+    check("role", "Role is required").isIn(["admin", "customer"]),
   ],
   authController.registerUser
 );

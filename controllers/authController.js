@@ -8,7 +8,7 @@ exports.registerUser = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const { username, password } = req.body;
+  const { username, password, role } = req.body;
 
   try {
     let user = await User.findOne({ username });
@@ -17,13 +17,14 @@ exports.registerUser = async (req, res) => {
       return res.status(400).json({ msg: "User already exists" });
     }
 
-    user = new User({ username, password });
+    user = new User({ username, password, role });
 
     await user.save();
 
     const payload = {
       user: {
         id: user.id,
+        role: user.role,
       },
     };
 
@@ -61,6 +62,7 @@ exports.loginUser = async (req, res) => {
     const payload = {
       user: {
         id: user.id,
+        role: user.role,
       },
     };
 
